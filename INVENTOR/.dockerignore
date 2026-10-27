@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.venv/
+backend/db.sqlite3
+backend/db.sqlite3.*
+npm-debug.log*
+.DS_Store

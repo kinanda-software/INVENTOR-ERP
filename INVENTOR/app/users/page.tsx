@@ -1,0 +1,1359 @@
+
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  Users,
+  UserPlus,
+  Search,
+  ShieldCheck,
+  UserCheck,
+  UserX,
+  Pencil,
+  Power,
+  X,
+  Mail,
+  Building2,
+  KeyRound,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+} from "lucide-react";
+
+type UserRole =
+  | "Administrator"
+  | "Manager"
+  | "Procurement"
+  | "Storekeeper"
+  | "Accountant"
+  | "Trucking"
+  | "Auditor";
+
+type UserStatus = "Active" | "Inactive";
+
+type SystemUser = {
+  id: number;
+  fullName: string;
+  username: string;
+  email: string;
+  department: string;
+  role: UserRole;
+  status: UserStatus;
+};
+
+type UserForm = {
+  fullName: string;
+  username: string;
+  email: string;
+  department: string;
+  role: UserRole;
+  status: UserStatus;
+  password: string;
+};
+
+type ApiUser = {
+  id: number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  department: string;
+  role: string;
+  is_active: boolean;
+  date_joined: string;
+  last_login: string | null;
+};
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+const USERS_API_URL = `${API_URL}/api/users/`;
+
+const roles: UserRole[] = [
+  "Administrator",
+  "Manager",
+  "Procurement",
+  "Storekeeper",
+  "Accountant",
+  "Trucking",
+  "Auditor",
+];
+
+const departments = [
+  "Administration",
+  "Management",
+  "Procurement",
+  "Inventory",
+  "Finance",
+  "Transport",
+  "Audit",
+];
+
+const ROLE_TO_API: Record<UserRole, string> = {
+  Administrator: "ADMIN",
+  Manager: "MANAGER",
+  Procurement: "PROCUREMENT",
+  Storekeeper: "STOREKEEPER",
+  Accountant: "ACCOUNTANT",
+  Trucking: "TRUCKING",
+  Auditor: "AUDITOR",
+};
+
+const API_TO_ROLE: Record<string, UserRole> = {
+  ADMIN: "Administrator",
+  MANAGER: "Manager",
+  PROCUREMENT: "Procurement",
+  STOREKEEPER: "Storekeeper",
+  ACCOUNTANT: "Accountant",
+  TRUCKING: "Trucking",
+  AUDITOR: "Auditor",
+};
+
+const emptyForm: UserForm = {
+  fullName: "",
+  username: "",
+  email: "",
+  department: "Administration",
+  role: "Storekeeper",
+  status: "Active",
+  password: "",
+};
+
+function mapApiUser(user: ApiUser): SystemUser {
+  const fullName =
+    `${user.first_name} ${user.last_name}`.trim() || user.username;
+
+  return {
+    id: user.id,
+    fullName,
+    username: user.username,
+    email: user.email,
+    department: user.department || "Administration",
+    role: API_TO_ROLE[user.role] ?? "Auditor",
+    status: user.is_active ? "Active" : "Inactive",
+  };
+}
+
+async function getApiError(response: Response): Promise<string> {
+  try {
+    const data: unknown = await response.json();
+
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "detail" in data &&
+      typeof data.detail === "string"
+    ) {
+      return data.detail;
+    }
+
+    if (typeof data === "object" && data !== null) {
+      return Object.entries(data)
+        .map(([field, value]) => {
+          const message = Array.isArray(value)
+            ? value.join(", ")
+            : typeof value === "string"
+              ? value
+              : JSON.stringify(value);
+
+          return `${field}: ${message}`;
+        })
+        .join(" ");
+    }
+
+    return `Request failed with HTTP ${response.status}.`;
+  } catch {
+    return `Request failed with HTTP ${response.status}.`;
+  }
+}
+
+function StatusBadge({ status }: { status: UserStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        status === "Active"
+          ? "bg-emerald-50 text-emerald-700"
+          : "bg-slate-100 text-slate-600"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          status === "Active" ? "bg-emerald-500" : "bg-slate-400"
+        }`}
+      />
+      {status}
+    </span>
+  );
+}
+
+function RoleBadge({ role }: { role: UserRole }) {
+  const colors: Record<UserRole, string> = {
+    Administrator: "bg-violet-50 text-violet-700",
+    Manager: "bg-blue-50 text-blue-700",
+    Procurement: "bg-amber-50 text-amber-700",
+    Storekeeper: "bg-cyan-50 text-cyan-700",
+    Accountant: "bg-emerald-50 text-emerald-700",
+    Trucking: "bg-orange-50 text-orange-700",
+    Auditor: "bg-slate-100 text-slate-700",
+  };
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${colors[role]}`}
+    >
+      {role}
+    </span>
+  );
+}
+
+function UserAvatar({ name }: { name: string }) {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
+      {initials || "U"}
+    </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+  color,
+}: {
+  title: string;
+  value: number;
+  description: string;
+  icon: typeof Users;
+  color: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900">{value}</h2>
+        </div>
+        <div className={`rounded-xl p-3 ${color}`}>
+          <Icon size={21} />
+        </div>
+      </div>
+      <p className="mt-4 text-xs text-slate-500">{description}</p>
+    </div>
+  );
+}
+
+export default function UsersPage() {
+  const [users, setUsers] = useState<SystemUser[]>([]);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("All Roles");
+  const [statusFilter, setStatusFilter] = useState("All Statuses");
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [form, setForm] = useState<UserForm>({ ...emptyForm });
+  const [formError, setFormError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState<"success" | "error">("success");
+  const [showPermissions, setShowPermissions] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<SystemUser | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const permissionDescriptions: Record<UserRole, string[]> = {
+    Administrator: [
+      "Manage user accounts and roles",
+      "Access all system modules",
+      "Configure system-wide settings",
+    ],
+    Manager: [
+      "View operational dashboards",
+      "Review business performance",
+      "Monitor procurement and transport",
+    ],
+    Procurement: [
+      "Manage suppliers",
+      "Create purchase orders",
+      "Review procurement records",
+    ],
+    Storekeeper: [
+      "Manage stock items",
+      "Record stock movements",
+      "Monitor reorder levels",
+    ],
+    Accountant: [
+      "Record income and expenses",
+      "Review financial transactions",
+      "Prepare financial reports",
+    ],
+    Trucking: [
+      "Manage vehicle records",
+      "Create and monitor trips",
+      "Update trip statuses",
+    ],
+    Auditor: [
+      "Review operational records",
+      "Inspect reports",
+      "Monitor business activity",
+    ],
+  };
+
+  const getHeaders = useCallback((json = false): HeadersInit => {
+    const token = localStorage.getItem("token");
+
+    return {
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Token ${token}` } : {}),
+    };
+  }, []);
+
+  const loadUsers = useCallback(
+    async (showMessage = false) => {
+      setLoading(true);
+
+      try {
+        const token = localStorage.getItem("token");
+
+        if (!token) {
+          setUsers([]);
+          setNoticeType("error");
+          setNotice("Please sign in before viewing system users.");
+          return;
+        }
+
+        const response = await fetch(USERS_API_URL, {
+          method: "GET",
+          headers: getHeaders(),
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(await getApiError(response));
+        }
+
+        const data: unknown = await response.json();
+
+        let apiUsers: ApiUser[];
+
+        if (Array.isArray(data)) {
+          apiUsers = data as ApiUser[];
+        } else if (
+          typeof data === "object" &&
+          data !== null &&
+          "results" in data &&
+          Array.isArray(data.results)
+        ) {
+          apiUsers = data.results as ApiUser[];
+        } else {
+          throw new Error("The server returned an unexpected users response.");
+        }
+
+        setUsers(apiUsers.map(mapApiUser));
+
+        if (showMessage) {
+          setNoticeType("success");
+          setNotice("User records refreshed from the database.");
+        } else {
+          setNotice("");
+        }
+      } catch (error) {
+        setNoticeType("error");
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Unable to load users from the database.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [getHeaders],
+  );
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
+  const activeCount = users.filter(
+    (user) => user.status === "Active",
+  ).length;
+
+  const inactiveCount = users.filter(
+    (user) => user.status === "Inactive",
+  ).length;
+
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return users.filter((user) => {
+      const matchesSearch =
+        !term ||
+        user.fullName.toLowerCase().includes(term) ||
+        user.username.toLowerCase().includes(term) ||
+        user.email.toLowerCase().includes(term) ||
+        user.department.toLowerCase().includes(term) ||
+        user.role.toLowerCase().includes(term);
+
+      const matchesRole =
+        roleFilter === "All Roles" || user.role === roleFilter;
+
+      const matchesStatus =
+        statusFilter === "All Statuses" || user.status === statusFilter;
+
+      return matchesSearch && matchesRole && matchesStatus;
+    });
+  }, [users, search, roleFilter, statusFilter]);
+
+  function openAddModal() {
+    setEditingUserId(null);
+    setForm({ ...emptyForm });
+    setFormError("");
+    setShowPermissions(false);
+    setModalOpen(true);
+  }
+
+  function openEditModal(user: SystemUser) {
+    setEditingUserId(user.id);
+
+    setForm({
+      fullName: user.fullName,
+      username: user.username,
+      email: user.email,
+      department: user.department,
+      role: user.role,
+      status: user.status,
+      password: "",
+    });
+
+    setFormError("");
+    setShowPermissions(false);
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    if (saving) return;
+
+    setModalOpen(false);
+    setEditingUserId(null);
+    setFormError("");
+    setForm({ ...emptyForm });
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+    setNotice("");
+
+    const fullName = form.fullName.trim();
+    const username = form.username.trim();
+    const email = form.email.trim().toLowerCase();
+    const password = form.password;
+
+    if (!fullName || !username || !email || !form.department) {
+      setFormError("Please fill in all required fields.");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setFormError("Please enter a valid email address.");
+      return;
+    }
+
+    if (editingUserId === null && password.length < 8) {
+      setFormError("A password of at least 8 characters is required.");
+      return;
+    }
+
+    if (editingUserId !== null && password.length > 0 && password.length < 8) {
+      setFormError("A new password must contain at least 8 characters.");
+      return;
+    }
+
+    const usernameExists = users.some(
+      (user) =>
+        user.username.toLowerCase() === username.toLowerCase() &&
+        user.id !== editingUserId,
+    );
+
+    if (usernameExists) {
+      setFormError("This username already exists. Choose another username.");
+      return;
+    }
+
+    const emailExists = users.some(
+      (user) =>
+        user.email.toLowerCase() === email && user.id !== editingUserId,
+    );
+
+    if (emailExists) {
+      setFormError("This email address is already registered.");
+      return;
+    }
+
+    const nameParts = fullName.split(/\s+/);
+    const firstName = nameParts.shift() ?? "";
+    const lastName = nameParts.join(" ");
+
+    const payload: Record<string, string | boolean> = {
+      first_name: firstName,
+      last_name: lastName,
+      username,
+      email,
+      department: form.department,
+      role: ROLE_TO_API[form.role],
+      is_active: form.status === "Active",
+    };
+
+    if (editingUserId === null || password.length > 0) {
+      payload.password = password;
+    }
+
+    setSaving(true);
+
+    try {
+      const isEditing = editingUserId !== null;
+
+      const url = isEditing
+        ? `${USERS_API_URL}${editingUserId}/`
+        : USERS_API_URL;
+
+      const response = await fetch(url, {
+        method: isEditing ? "PATCH" : "POST",
+        headers: getHeaders(true),
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(await getApiError(response));
+      }
+
+      const savedUser = (await response.json()) as ApiUser;
+      const mappedUser = mapApiUser(savedUser);
+
+      setUsers((current) =>
+        isEditing
+          ? current.map((user) =>
+              user.id === mappedUser.id ? mappedUser : user,
+            )
+          : [...current, mappedUser],
+      );
+
+      setNoticeType("success");
+      setNotice(
+        isEditing
+          ? `${mappedUser.fullName}'s account was updated successfully.`
+          : `${mappedUser.fullName} was added successfully.`,
+      );
+
+      setModalOpen(false);
+      setEditingUserId(null);
+      setForm({ ...emptyForm });
+      setFormError("");
+    } catch (error) {
+      setFormError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the user.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleUserStatus(user: SystemUser) {
+    if (
+      user.role === "Administrator" &&
+      user.status === "Active" &&
+      users.filter(
+        (item) =>
+          item.role === "Administrator" && item.status === "Active",
+      ).length === 1
+    ) {
+      setNoticeType("error");
+      setNotice("The last active administrator cannot be deactivated.");
+      return;
+    }
+
+    const nextStatus: UserStatus =
+      user.status === "Active" ? "Inactive" : "Active";
+
+    setNotice("");
+
+    try {
+      const response = await fetch(`${USERS_API_URL}${user.id}/`, {
+        method: "PATCH",
+        headers: getHeaders(true),
+        body: JSON.stringify({
+          is_active: nextStatus === "Active",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await getApiError(response));
+      }
+
+      const savedUser = (await response.json()) as ApiUser;
+      const mappedUser = mapApiUser(savedUser);
+
+      setUsers((current) =>
+        current.map((item) =>
+          item.id === mappedUser.id ? mappedUser : item,
+        ),
+      );
+
+      setSelectedUser(null);
+      setNoticeType("success");
+      setNotice(
+        `${mappedUser.fullName}'s account is now ${nextStatus.toLowerCase()}.`,
+      );
+    } catch (error) {
+      setNoticeType("error");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Unable to update the account status.",
+      );
+    }
+  }
+
+  function refreshUsers() {
+    setSearch("");
+    setRoleFilter("All Roles");
+    setStatusFilter("All Statuses");
+    void loadUsers(true);
+  }
+
+  return (
+    <main className="min-h-0 w-full min-w-0 bg-slate-50 p-0 text-slate-900">
+      <div className="w-full min-w-0 space-y-4">
+        {/* Header */}
+        <div className="mb-4 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm text-slate-500">
+              <ShieldCheck size={16} />
+              <span>System Administration</span>
+              <span>/</span>
+              <span>User Management</span>
+            </div>
+
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+              User Management
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-500">
+              Manage employee accounts, system roles, and account status.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            <UserPlus size={18} />
+            Add User
+          </button>
+        </div>
+
+        {/* Loading state */}
+        {loading && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+            <RefreshCw size={18} className="animate-spin" />
+            Loading user records from the database...
+          </div>
+        )}
+
+        {/* Success and error notices */}
+        {notice && (
+          <div
+            className={`mb-6 flex items-start justify-between gap-3 rounded-xl border p-4 ${
+              noticeType === "error"
+                ? "border-red-200 bg-red-50"
+                : "border-emerald-200 bg-emerald-50"
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              {noticeType === "error" ? (
+                <AlertCircle
+                  size={18}
+                  className="mt-0.5 shrink-0 text-red-700"
+                />
+              ) : (
+                <CheckCircle2
+                  size={18}
+                  className="mt-0.5 shrink-0 text-emerald-700"
+                />
+              )}
+
+              <p
+                className={`text-sm ${
+                  noticeType === "error"
+                    ? "text-red-800"
+                    : "text-emerald-800"
+                }`}
+              >
+                {notice}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setNotice("")}
+              aria-label="Dismiss notification"
+              className={
+                noticeType === "error"
+                  ? "text-red-700 hover:text-red-900"
+                  : "text-emerald-700 hover:text-emerald-900"
+              }
+            >
+              <X size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* Metrics */}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            title="Total Users"
+            value={users.length}
+            description="All registered system accounts"
+            icon={Users}
+            color="bg-blue-50 text-blue-700"
+          />
+
+          <MetricCard
+            title="Active Users"
+            value={activeCount}
+            description="Accounts currently active"
+            icon={UserCheck}
+            color="bg-emerald-50 text-emerald-700"
+          />
+
+          <MetricCard
+            title="Inactive Users"
+            value={inactiveCount}
+            description="Accounts currently inactive"
+            icon={UserX}
+            color="bg-amber-50 text-amber-700"
+          />
+
+          <MetricCard
+            title="System Roles"
+            value={roles.length}
+            description="Available role categories"
+            icon={KeyRound}
+            color="bg-violet-50 text-violet-700"
+          />
+        </div>
+
+        {/* Role overview */}
+        <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-slate-900">
+              Roles & Responsibilities
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Example responsibilities assigned to each role.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {roles.map((role) => (
+              <button
+                type="button"
+                key={role}
+                onClick={() => {
+                  setRoleFilter(role);
+                  setSearch("");
+                  setStatusFilter("All Statuses");
+                  document
+                    .getElementById("user-register")
+                    ?.scrollIntoView({ behavior: "smooth" });
+                }}
+                className="rounded-xl border border-slate-200 p-4 text-left transition hover:border-blue-300 hover:bg-blue-50/40"
+              >
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <RoleBadge role={role} />
+                  <span className="text-xs text-slate-400">
+                    {users.filter((user) => user.role === role).length} users
+                  </span>
+                </div>
+
+                <p className="text-sm leading-6 text-slate-600">
+                  {permissionDescriptions[role][0]}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Click to filter users
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* User register */}
+        <section
+          id="user-register"
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
+          <div className="flex flex-col justify-between gap-4 border-b border-slate-100 p-5 xl:flex-row xl:items-center">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                Employee Accounts
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                {filteredUsers.length} of {users.length} users displayed
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <div className="relative">
+                <Search
+                  size={17}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search users..."
+                  className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 sm:w-56"
+                />
+              </div>
+
+              <select
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500"
+                aria-label="Filter by role"
+              >
+                <option value="All Roles">All Roles</option>
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500"
+                aria-label="Filter by account status"
+              >
+                <option value="All Statuses">All Statuses</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={refreshUsers}
+                disabled={loading}
+                title="Refresh users from the database"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw
+                  size={16}
+                  className={loading ? "animate-spin" : ""}
+                />
+                {loading ? "Loading..." : "Refresh users"}
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[950px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-5 py-4 font-semibold">Employee</th>
+                  <th className="px-5 py-4 font-semibold">Department</th>
+                  <th className="px-5 py-4 font-semibold">Role</th>
+                  <th className="px-5 py-4 font-semibold">Status</th>
+                  <th className="px-5 py-4 text-right font-semibold">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-100">
+                {filteredUsers.map((user) => (
+                  <tr key={user.id} className="transition hover:bg-slate-50">
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <UserAvatar name={user.fullName} />
+
+                        <div>
+                          <p className="font-semibold text-slate-900">
+                            {user.fullName}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            @{user.username}
+                          </p>
+
+                          <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                            <Mail size={12} />
+                            {user.email || "No email provided"}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2 text-slate-600">
+                        <Building2 size={15} className="text-slate-400" />
+                        {user.department}
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <RoleBadge role={user.role} />
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <StatusBadge status={user.status} />
+                    </td>
+
+                    <td className="px-5 py-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUser(user)}
+                          title="View user details"
+                          aria-label={`View ${user.fullName}`}
+                          className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"
+                        >
+                          <Eye size={16} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(user)}
+                          title="Edit user"
+                          aria-label={`Edit ${user.fullName}`}
+                          className="rounded-lg border border-slate-200 p-2 text-blue-700 hover:bg-blue-50"
+                        >
+                          <Pencil size={16} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void toggleUserStatus(user)}
+                          title={
+                            user.status === "Active"
+                              ? "Deactivate account"
+                              : "Activate account"
+                          }
+                          aria-label={`Change status for ${user.fullName}`}
+                          className={`rounded-lg border p-2 ${
+                            user.status === "Active"
+                              ? "border-red-200 text-red-600 hover:bg-red-50"
+                              : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                          }`}
+                        >
+                          <Power size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+
+                {!loading && filteredUsers.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-5 py-14 text-center text-slate-500"
+                    >
+                      <Users
+                        size={28}
+                        className="mx-auto mb-3 text-slate-300"
+                      />
+
+                      <p className="font-medium text-slate-700">
+                        No users found
+                      </p>
+
+                      <p className="mt-1 text-sm">
+                        Try changing your search or filters.
+                      </p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col justify-between gap-2 border-t border-slate-100 px-5 py-4 text-xs text-slate-500 sm:flex-row">
+            <p>Showing {filteredUsers.length} user accounts</p>
+            <p>Account changes are saved to the system database.</p>
+          </div>
+        </section>
+
+        <footer className="mt-8 border-t border-slate-200 pt-5 text-xs text-slate-500">
+          Integrated Finance, Procurement, Inventory & Trucking System
+          <span className="mx-2">·</span>
+          User Management
+        </footer>
+      </div>
+
+      {/* Add / Edit modal */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">
+          <div className="my-auto w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 p-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  {editingUserId !== null ? "Edit User" : "Add New User"}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Enter the employee account details below.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeModal}
+                disabled={saving}
+                aria-label="Close user form"
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-5">
+              {formError && (
+                <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  <AlertCircle size={17} className="mt-0.5 shrink-0" />
+                  <p>{formError}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Full name *
+                  <input
+                    required
+                    value={form.fullName}
+                    onChange={(event) =>
+                      setForm({ ...form, fullName: event.target.value })
+                    }
+                    placeholder="e.g. Amina Joseph"
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  Username *
+                  <input
+                    required
+                    value={form.username}
+                    onChange={(event) =>
+                      setForm({ ...form, username: event.target.value })
+                    }
+                    placeholder="e.g. amina.j"
+                    autoComplete="off"
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  Email address *
+                  <input
+                    required
+                    type="email"
+                    value={form.email}
+                    onChange={(event) =>
+                      setForm({ ...form, email: event.target.value })
+                    }
+                    placeholder="employee@example.com"
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  {editingUserId !== null
+                    ? "New password (optional)"
+                    : "Password *"}
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    required={editingUserId === null}
+                    minLength={8}
+                    value={form.password}
+                    onChange={(event) =>
+                      setForm({ ...form, password: event.target.value })
+                    }
+                    placeholder={
+                      editingUserId !== null
+                        ? "Leave blank to keep current password"
+                        : "At least 8 characters"
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  Department *
+                  <select
+                    required
+                    value={form.department}
+                    onChange={(event) =>
+                      setForm({ ...form, department: event.target.value })
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  >
+                    {departments.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  System role *
+                  <select
+                    required
+                    value={form.role}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        role: event.target.value as UserRole,
+                      })
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  >
+                    {roles.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                  Account status *
+                  <select
+                    required
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        status: event.target.value as UserStatus,
+                      })
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-200 p-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPermissions(!showPermissions)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    <ShieldCheck size={17} className="text-blue-600" />
+                    Example responsibilities for {form.role}
+                  </span>
+
+                  {showPermissions ? (
+                    <EyeOff size={17} className="text-slate-500" />
+                  ) : (
+                    <Eye size={17} className="text-slate-500" />
+                  )}
+                </button>
+
+                {showPermissions && (
+                  <ul className="mt-3 space-y-2">
+                    {permissionDescriptions[form.role].map((permission) => (
+                      <li
+                        key={permission}
+                        className="flex items-start gap-2 text-sm text-slate-600"
+                      >
+                        <CheckCircle2
+                          size={15}
+                          className="mt-0.5 shrink-0 text-emerald-600"
+                        />
+                        {permission}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  These are descriptions for the interface. Actual permissions
+                  must be enforced by the Django backend.
+                </p>
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  disabled={saving}
+                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingUserId !== null
+                      ? "Save Changes"
+                      : "Add User"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* User details modal */}
+      {selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">
+          <div className="my-auto w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 p-5">
+              <h2 className="text-xl font-bold text-slate-900">
+                User Details
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => setSelectedUser(null)}
+                aria-label="Close user details"
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="flex items-center gap-4">
+                <UserAvatar name={selectedUser.fullName} />
+
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {selectedUser.fullName}
+                  </h3>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    @{selectedUser.username}
+                  </p>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <RoleBadge role={selectedUser.role} />
+                    <StatusBadge status={selectedUser.status} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">
+                    Email address
+                  </p>
+
+                  <p className="mt-2 break-all text-sm text-slate-800">
+                    {selectedUser.email || "No email provided"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">
+                    Department
+                  </p>
+
+                  <p className="mt-2 text-sm text-slate-800">
+                    {selectedUser.department}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">
+                    Role responsibilities
+                  </p>
+
+                  <ul className="mt-3 space-y-2">
+                    {permissionDescriptions[selectedUser.role].map((item) => (
+                      <li
+                        key={item}
+                        className="flex gap-2 text-sm text-slate-600"
+                      >
+                        <CheckCircle2
+                          size={15}
+                          className="mt-0.5 shrink-0 text-emerald-600"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const user = selectedUser;
+                    setSelectedUser(null);
+                    openEditModal(user);
+                  }}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  <Pencil size={16} />
+                  Edit User
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void toggleUserStatus(selectedUser)}
+                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${
+                    selectedUser.status === "Active"
+                      ? "border-red-200 text-red-700 hover:bg-red-50"
+                      : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                  }`}
+                >
+                  <Power size={16} />
+                  {selectedUser.status === "Active"
+                    ? "Deactivate"
+                    : "Activate"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
